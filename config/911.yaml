@@ -1,0 +1,15 @@
+#四鱼眼拼接等矩形投影图标定配置文件
+#标注好的雷达点路径
+lidar_out: "./sign/lidar_point911.txt"
+#标注好的图片点路径
+photo_out: "./sign/photo_point911.txt"
+#雷达pcd文件夹路径
+lidar_dir: "./example/911/lidar"
+#图片文件夹路径
+image_dir: "./example/911/photo"
+#外参保存路径
+extrinsic_out: "./result/extrinsic_911.txt"
+#图片宽
+image_width: 5188.0
+#图片高
+image_height: 2594.0

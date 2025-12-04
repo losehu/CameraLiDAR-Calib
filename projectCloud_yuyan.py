@@ -12,6 +12,7 @@ from pathlib import Path
 import open3d as o3d
 import sys
 import math
+import yaml
 
 # ====== 全局参数 ======
 POINT_ALPHA = 0.60  # 雷达点的不透明度（0=全透明，1=不透明）
@@ -399,12 +400,65 @@ def print_state(pitch_deg, roll_deg, yaw_deg, t_mm):
 
 # ============ 主程序 ============
 def main():
-    # 路径设置
-    img_dir = "/Users/losehu/Library/Containers/com.tencent.xinWeChat/Data/Documents/xwechat_files/wxid_y3fi4f9tcu0322_11eb/msg/file/2025-11/911_ 2/image"
-    pcd_dir = "/Users/losehu/Library/Containers/com.tencent.xinWeChat/Data/Documents/xwechat_files/wxid_y3fi4f9tcu0322_11eb/msg/file/2025-11/911_ 2/lidar"
-    extrinsic_path = "/Users/losehu/Documents/归档/Pano_Video/calib/build/sign/extrinsic_923_py.txt"
-    output_path = "./result.png"
-    
+    # 读取配置（与 main_yuyan.py 相同风格）
+    def load_config(path: Path) -> dict:
+        try:
+            with open(path, 'r', encoding='utf-8') as stream:
+                data = yaml.safe_load(stream)
+        except FileNotFoundError as exc:
+            print(f"Config file not found: {path}")
+            return None
+        except yaml.YAMLError as exc:
+            print(f"Failed to parse YAML config: {exc}")
+            return None
+
+        if not isinstance(data, dict):
+            print("Config file must contain a mapping of keys to values")
+            return None
+
+        redirect = data.get('config_path')
+        if redirect:
+            nested_path = (path.parent / str(redirect)).resolve()
+            try:
+                with open(nested_path, 'r', encoding='utf-8') as stream:
+                    nested = yaml.safe_load(stream)
+            except FileNotFoundError:
+                print(f"Nested config file not found: {nested_path}")
+                return None
+            except yaml.YAMLError as exc:
+                print(f"Failed to parse nested YAML config: {exc}")
+                return None
+            if not isinstance(nested, dict):
+                print("Nested config file must contain a mapping of keys to values")
+                return None
+            return nested
+
+        return data
+
+    config_path = Path(__file__).resolve().parent / 'config/config.yaml'
+    config = load_config(config_path)
+
+    # 默认值（当配置缺失时作为回退）
+    img_dir = None
+    pcd_dir = None
+    extrinsic_path = None
+
+    if config:
+        # 支持以下键：image_dir, pcd_dir 或 lidar_dir, extrinsic_out, output_path
+        img_dir = str(config.get('image_dir') or '') or None
+        pcd_dir = str(config.get('pcd_dir') or config.get('lidar_dir') or '') or None
+        extrinsic_path = str(config.get('extrinsic_out') or '') or None
+
+    # 若仍为空，则使用旧的硬编码路径（确保可运行）
+    if not img_dir:
+        print("Warning: image_dir not set in config, using default path")
+        exit(1)
+    if not pcd_dir:
+        print("Warning: pcd_dir not set in config, using default path")
+        exit(1)
+    if not extrinsic_path:
+        print("Warning: extrinsic_out not set in config, using default path")
+        exit(1)
     # 获取图片列表
     img_extensions = ['*.jpg', '*.jpeg', '*.png', '*.JPG', '*.JPEG', '*.PNG']
     img_files = []
@@ -524,7 +578,6 @@ def main():
             
             # 退出程序
             if key == 27 or key == ord('q') or key == ord('Q'):  # ESC or q
-                cv2.imwrite(output_path, canvas)
                 print("Quitting...")
                 cv2.destroyAllWindows()
                 return

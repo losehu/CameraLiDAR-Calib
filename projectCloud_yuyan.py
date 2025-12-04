@@ -22,7 +22,8 @@ TRANS_STEP_MM = 100.0  # 每次平移改变量（毫米）
 VOXEL_DOWNSAMPLE_M = 0.03  # 体素降采样尺寸（米），0 表示不降采样
 MAX_POINTS_PER_PCD = 150000  # 每帧点数上限，0 表示不限制
 
-
+width = None
+height = None
 # ============ HSV -> RGB（用于深度着色） ============
 def hsv_to_rgb(h, s, v):
     """
@@ -314,10 +315,11 @@ def get_theoretical_uv_yuyan(ext, x_mm, y_mm, z_mm):
     # 经度：从 +Z 轴（前方）开始，沿 +Z→+X 为正
     lon = np.arctan2(v, u)  # [-π, π]
     lat = np.arctan2(depth, np.sqrt(u * u + v * v))  # [-π/2, π/2]
-    
+
+    global width, height
     # 转为像素坐标（全景图尺寸：5188 x 2594）
-    uv_0 = (np.pi - lon) * 5188 / (2 * np.pi)
-    uv_1 = (np.pi / 2 - lat) * 2594 / np.pi
+    uv_0 = (np.pi - lon) * width / (2 * np.pi)
+    uv_1 = (np.pi / 2 - lat) * height / np.pi
     
     return uv_0, uv_1
 
@@ -442,12 +444,15 @@ def main():
     img_dir = None
     pcd_dir = None
     extrinsic_path = None
+    global width, height
 
     if config:
         # 支持以下键：image_dir, pcd_dir 或 lidar_dir, extrinsic_out, output_path
         img_dir = str(config.get('image_dir') or '') or None
         pcd_dir = str(config.get('pcd_dir') or config.get('lidar_dir') or '') or None
         extrinsic_path = str(config.get('extrinsic_out') or '') or None
+        width = config.get('image_width')
+        height = config.get('image_height')
 
     # 若仍为空，则使用旧的硬编码路径（确保可运行）
     if not img_dir:
@@ -459,6 +464,10 @@ def main():
     if not extrinsic_path:
         print("Warning: extrinsic_out not set in config, using default path")
         exit(1)
+    if not width or not height:
+        print("Warning: width/height not set in config")
+        exit(1)
+
     # 获取图片列表
     img_extensions = ['*.jpg', '*.jpeg', '*.png', '*.JPG', '*.JPEG', '*.PNG']
     img_files = []

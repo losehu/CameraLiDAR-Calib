@@ -14,13 +14,21 @@ import sys
 import math
 import yaml
 
+# 尝试导入获取屏幕大小的库
+try:
+    import tkinter as tk
+    HAS_TKINTER = True
+except ImportError:
+    HAS_TKINTER = False
+
 # ====== 全局参数 ======
 POINT_ALPHA = 0.60  # 雷达点的不透明度（0=全透明，1=不透明）
-THRESHOLD_LIDAR = 3000
+POINT_RADIUS = 2  # 点半径（像素）
+THRESHOLD_LIDAR = 300000000000
 DEG_STEP = 1.0  # 每次角度改变量（度）
 TRANS_STEP_MM = 100.0  # 每次平移改变量（毫米）
 VOXEL_DOWNSAMPLE_M = 0.03  # 体素降采样尺寸（米），0 表示不降采样
-MAX_POINTS_PER_PCD = 150000  # 每帧点数上限，0 表示不限制
+MAX_POINTS_PER_PCD = 0  # 每帧点数上限，0 表示不限制
 
 width = None
 height = None
@@ -231,6 +239,88 @@ def orthonormalize(R):
     return (U @ Vt).astype(np.float32)
 
 
+# ============ 内参读取 ============
+def load_intrinsics_file(path: str):
+    """从文件读取内参矩阵和畸变系数"""
+    values = []
+    with open(path, 'r', encoding='utf-8') as f:
+        for line in f:
+            stripped = line.strip()
+            if not stripped or stripped.startswith('#'):
+                continue
+            for token in stripped.split():
+                try:
+                    values.append(float(token))
+                except ValueError:
+                    continue
+    if len(values) < 9:
+        raise ValueError(f"Intrinsics file requires at least 9 numeric values: {path}")
+    K = np.array(values[:9], dtype=float).reshape(3, 3)
+    distortion = np.zeros(5, dtype=float)
+    remaining = values[9:]
+    for idx in range(min(5, len(remaining))):
+        distortion[idx] = remaining[idx]
+    return K, distortion
+
+
+# ============ 等距圆柱投影函数 ============
+def project_point_uv_from_ext(Rmat, tvec, x, y, z, img_width, img_height):
+    """等距圆柱投影（对应 getTheoreticalUV_yuyan 逻辑）"""
+    matrix2 = np.zeros((3, 4), dtype=float)
+    matrix2[:, :3] = Rmat
+    matrix2[:, 3] = tvec
+    coord = np.array([x, y, z, 1.0], dtype=float)
+    result = matrix2 @ coord
+    u = float(result[0])
+    v = float(result[1])
+    depth = float(result[2])
+    n = math.sqrt(u * u + v * v + depth * depth)
+    if n > 0:
+        u /= n
+        v /= n
+        depth /= n
+    lon = math.atan2(v, u)
+    lat = math.atan2(depth, math.sqrt(u * u + v * v))
+    uv0 = (math.pi - lon) * img_width / (2.0 * math.pi)
+    uv1 = (0.5 * math.pi - lat) * img_height / math.pi
+    return uv0, uv1
+
+
+# ============ 投影器创建 ============
+def make_projector(model: str, img_width: float, img_height: float, intrinsics=None, distortion=None):
+    """创建投影器函数，支持针孔和等距圆柱投影"""
+    model_lower = (model or 'equirectangular').lower()
+    if model_lower == 'pinhole':
+        if intrinsics is None:
+            raise ValueError("Pinhole projection requires intrinsics.")
+        K = np.asarray(intrinsics, dtype=float)
+        dist = np.zeros(5, dtype=float)
+        if distortion is not None:
+            dist[:min(len(distortion), 5)] = np.asarray(distortion, dtype=float)[:min(len(distortion), 5)]
+        def projector(Rmat, tvec, point):
+            p_c = Rmat @ point + tvec
+            z = p_c[2]
+            if abs(z) < 1e-9:
+                z = 1e-9 if z >= 0 else -1e-9
+            x = p_c[0] / z
+            y = p_c[1] / z
+            r2 = x * x + y * y
+            k1, k2, p1, p2, k3 = dist
+            radial = 1.0 + k1 * r2 + k2 * r2 * r2 + k3 * r2 * r2 * r2
+            x_distorted = x * radial + 2.0 * p1 * x * y + p2 * (r2 + 2.0 * x * x)
+            y_distorted = y * radial + p1 * (r2 + 2.0 * y * y) + 2.0 * p2 * x * y
+            uv_h = K @ np.array([x_distorted, y_distorted, 1.0], dtype=float)
+            denom = uv_h[2]
+            if abs(denom) < 1e-9:
+                denom = 1e-9 if denom >= 0 else -1e-9
+            return float(uv_h[0] / denom), float(uv_h[1] / denom)
+        return projector, model_lower
+    # 等距圆柱投影
+    def projector(Rmat, tvec, point):
+        return project_point_uv_from_ext(Rmat, tvec, point[0], point[1], point[2], img_width, img_height)
+    return projector, 'equirectangular'
+
+
 # ============ 外参读取（需要根据实际格式调整） ============
 def get_extrinsic(extrinsic_path):
     """
@@ -280,50 +370,6 @@ def get_extrinsic(extrinsic_path):
         return None
 
 
-# ============ 投影函数（基于 getTheoreticalUV_yuyan） ============
-def get_theoretical_uv_yuyan(ext, x_mm, y_mm, z_mm):
-    """
-    将雷达点 (x, y, z) 毫米坐标投影到全景图像 UV
-    对应 C++ 中的 getTheoreticalUV_yuyan 函数
-    使用等距圆柱投影（经纬度映射）
-    """
-    # 构建外参矩阵 3x4
-    matrix2 = np.array([
-        [ext[0], ext[1], ext[2], ext[3]],
-        [ext[4], ext[5], ext[6], ext[7]],
-        [ext[8], ext[9], ext[10], ext[11]]
-    ], dtype=np.float64)
-    
-    # 齐次坐标
-    coordinate = np.array([x_mm, y_mm, z_mm, 1.0], dtype=np.float64)
-    
-    # 变换到相机坐标系
-    result = matrix2 @ coordinate
-    
-    u = result[0]
-    v = result[1]
-    depth = result[2]
-    
-    # 归一化
-    n = np.sqrt(u * u + v * v + depth * depth)
-    if n > 0:
-        u /= n
-        v /= n
-        depth /= n
-    
-    # 计算经纬度
-    # 经度：从 +Z 轴（前方）开始，沿 +Z→+X 为正
-    lon = np.arctan2(v, u)  # [-π, π]
-    lat = np.arctan2(depth, np.sqrt(u * u + v * v))  # [-π/2, π/2]
-
-    global width, height
-    # 转为像素坐标（全景图尺寸：5188 x 2594）
-    uv_0 = (np.pi - lon) * width / (2 * np.pi)
-    uv_1 = (np.pi / 2 - lat) * height / np.pi
-    
-    return uv_0, uv_1
-
-
 # ============ 深度范围计算 ============
 def compute_depth_range(pointcloud):
     """计算点云的深度范围"""
@@ -341,48 +387,108 @@ def compute_depth_range(pointcloud):
 
 
 # ============ 渲染投影 ============
-def render_projection(base_img, pointcloud, depth_range, extrinsic, threshold_lidar):
+def render_projection(base_img, pointcloud, depth_range, Rmat, tvec, projector):
     """
     将点云投影到图像上
+    projector: 投影器函数，接受 (Rmat, tvec, point) 返回 (u, v)
+    颜色按能投影到图像的点的深度范围归一化，使用彩虹色映射
     """
     overlay = base_img.copy()
-    dmin, dmax = depth_range
-    
+    img_h, img_w = overlay.shape[:2]
+
+    # 先筛选出能投到图像上的点，并收集其深度用于归一化
+    valid_points = []
+    depths_valid = []
     for pt in pointcloud:
         x, y, z = pt[0], pt[1], pt[2]
-        depth = np.sqrt(x**2 + y**2 + z**2)
-        
-        # 深度归一化
-        t = np.arctan(((depth - dmin) / (dmax - dmin)) * 10)
-        t = np.clip(t, 0.0, 1.0)
-        
-        # 投影到图像
-        u, v = get_theoretical_uv_yuyan(extrinsic, x * 1000, y * 1000, z * 1000)
-        
-        u_int, v_int = int(round(u)), int(round(v))
-        
-        # 检查是否在图像范围内
-        if u_int < 0 or u_int >= overlay.shape[1] or v_int < 0 or v_int >= overlay.shape[0]:
+        point_mm = np.array([x * 1000.0, y * 1000.0, z * 1000.0], dtype=np.float64)
+        try:
+            u, v = projector(Rmat, tvec, point_mm)
+        except Exception:
             continue
-        
-        # 颜色编码（深度）
-        hue = (1.0 - t) * 270.0
+        if not (np.isfinite(u) and np.isfinite(v)):
+            continue
+        u_int, v_int = int(round(u)), int(round(v))
+        if u_int < 0 or u_int >= img_w or v_int < 0 or v_int >= img_h:
+            continue
+
+        try:
+            p_c = Rmat.astype(np.float64) @ point_mm + tvec.astype(np.float64)
+            depth_cam = float(abs(p_c[2]))  # 使用相机坐标系的 Z 轴距离（毫米）
+        except Exception:
+            depth_cam = float(abs(point_mm[2]))
+
+        valid_points.append((u_int, v_int, depth_cam))
+        depths_valid.append(depth_cam)
+
+    if len(depths_valid) == 0:
+        return base_img.copy()
+
+    dmin = float(np.min(depths_valid))
+    dmax = float(np.max(depths_valid))
+    if dmax <= dmin:
+        dmax = dmin + 1e-6
+
+    # 遍历已筛选的点：颜色基于“能投到图像上的点”的深度范围
+    for u_int, v_int, depth_cam in valid_points:
+
+        # 使用全局深度范围归一化并做非线性映射避免饱和
+        t_norm = (depth_cam - dmin) / (dmax - dmin)
+        t_norm = np.clip(t_norm, 0.0, 1.0)
+        t = np.arctan(t_norm * 4.0) / (np.pi / 2.0)
+        # 颜色按照红->橙->黄->绿->青->蓝->紫过渡
+        hue = t * 300.0
         r, g, b = hsv_to_rgb(hue, 1.0, 1.0)
-        
-        # 画点
-        cv2.circle(overlay, (u_int, v_int), 5, (b, g, r), -1, cv2.LINE_AA)
-    
-    # 混合
+        cv2.circle(overlay, (u_int, v_int), POINT_RADIUS, (b, g, r), -1, cv2.LINE_AA)
+
     out_img = cv2.addWeighted(overlay, POINT_ALPHA, base_img, 1.0 - POINT_ALPHA, 0.0)
-    
     return out_img
+
+
+# ============ 屏幕自适应 ============
+def get_screen_size():
+    """获取屏幕大小，返回 (width, height)"""
+    if HAS_TKINTER:
+        try:
+            root = tk.Tk()
+            width = root.winfo_screenwidth()
+            height = root.winfo_screenheight()
+            root.destroy()
+            return width, height
+        except Exception:
+            pass
+    # 默认值（如果无法获取）
+    return 1920, 1080
+
+
+def resize_to_fit_screen(img, max_scale=0.9):
+    """
+    调整图像大小以适应屏幕
+    max_scale: 最大占用屏幕的比例（默认90%）
+    返回调整后的图像和缩放比例
+    """
+    screen_w, screen_h = get_screen_size()
+    img_h, img_w = img.shape[:2]
+    
+    # 计算缩放比例
+    scale_w = (screen_w * max_scale) / img_w
+    scale_h = (screen_h * max_scale) / img_h
+    scale = min(scale_w, scale_h, 1.0)  # 不超过原始大小，只缩小不放大
+    
+    if scale < 1.0:
+        new_w = int(img_w * scale)
+        new_h = int(img_h * scale)
+        resized = cv2.resize(img, (new_w, new_h), interpolation=cv2.INTER_LINEAR)
+        return resized, scale
+    else:
+        return img, 1.0
 
 
 # ============ HUD 显示 ============
 def draw_hud(img, pitch_deg, roll_deg, yaw_deg, t_mm):
     """在图像上绘制 HUD 信息"""
     text1 = f"Pitch(x): {pitch_deg:.3f} deg | Roll(y): {roll_deg:.3f} deg | Yaw(z): {yaw_deg:.3f} deg"
-    text2 = f"t (mm): x={t_mm[0]:.2f}  y={t_mm[1]:.2f}  z={t_mm[2]:.2f}"
+    text2 = f"t (mm): x={t_mm[0]:.2f}  y={t_mm[1]:.2f}  z={t_mm[2]:.2f}  R={POINT_RADIUS}px"
     text3 = "[u/j]=+/- pitch(x)  [n/m]=-/+ roll(y)  [h/k]=-/+ yaw(z)"
     text4 = "[w/s]=+/- x  [a/d]=-/+ y  [z/x]=-/+ z   [r]=reset  [p]=print"
     text5 = "[SPACE/ENTER]=next image  [q/ESC]=quit"
@@ -451,8 +557,8 @@ def main():
         img_dir = str(config.get('image_dir') or '') or None
         pcd_dir = str(config.get('pcd_dir') or config.get('lidar_dir') or '') or None
         extrinsic_path = str(config.get('extrinsic_out') or '') or None
-        width = config.get('image_width')
-        height = config.get('image_height')
+        width = config.get('image_width') or config.get('width')
+        height = config.get('image_height') or config.get('height')
 
     # 若仍为空，则使用旧的硬编码路径（确保可运行）
     if not img_dir:
@@ -467,9 +573,40 @@ def main():
     if not width or not height:
         print("Warning: width/height not set in config")
         exit(1)
+    
+    # 读取投影模型和内参
+    projection_model = str(config.get('projection_model', 'equirectangular')) if config else 'equirectangular'
+    intrinsics_path = config.get('intrinsics_path') if config else None
+    intrinsics = None
+    distortion = None
+    
+    if projection_model.lower() == 'pinhole':
+        if not intrinsics_path:
+            print("Config missing intrinsics_path for pinhole projection")
+            exit(1)
+        try:
+            intrinsics, distortion = load_intrinsics_file(str(intrinsics_path))
+            print(f"Loaded intrinsics from {intrinsics_path}")
+        except (OSError, ValueError) as exc:
+            print(f"Failed to load intrinsics: {exc}")
+            exit(1)
+    
+    # 创建投影器
+    try:
+        projector, projection_model_used = make_projector(
+            projection_model,
+            float(width),
+            float(height),
+            intrinsics=intrinsics,
+            distortion=distortion,
+        )
+        print(f"Using projection model: {projection_model_used}")
+    except ValueError as exc:
+        print(f"Failed to create projector: {exc}")
+        exit(1)
 
     # 获取图片列表
-    img_extensions = ['*.jpg', '*.jpeg', '*.png', '*.JPG', '*.JPEG', '*.PNG']
+    img_extensions = ['*.jpg', '*.jpeg', '*.png', '*.JPG', '*.JPEG', '*.PNG', '*.bmp', '*.BMP']
     img_files = []
     for ext in img_extensions:
         img_files.extend(glob.glob(os.path.join(img_dir, ext)))
@@ -556,14 +693,20 @@ def main():
         
         while True:
             # 渲染
-            ext_now = rt_to_vec(R_cur, t_cur, want16)
-            canvas = render_projection(src_img, pointcloud, depth_range, ext_now, THRESHOLD_LIDAR)
+            canvas = render_projection(src_img, pointcloud, depth_range, R_cur, t_cur, projector)
             draw_hud(canvas, cum_pitch_x, cum_roll_y, cum_yaw_z, t_cur)
+            
+            # 自适应调整图像大小以适应屏幕
+            display_img, scale = resize_to_fit_screen(canvas, max_scale=0.9)
             
             # 确保窗口存在并更新标题（复用同一个窗口避免频繁销毁）
             if not window_created:
                 try:
-                    cv2.namedWindow(window_name, cv2.WINDOW_AUTOSIZE)
+                    # 使用 WINDOW_NORMAL 允许调整窗口大小
+                    cv2.namedWindow(window_name, cv2.WINDOW_NORMAL)
+                    # 设置窗口大小为显示图像的大小
+                    h, w = display_img.shape[:2]
+                    cv2.resizeWindow(window_name, w, h)
                 except Exception:
                     pass
                 window_created = True
@@ -575,7 +718,7 @@ def main():
                 except Exception:
                     pass
 
-            cv2.imshow(window_name, canvas)
+            cv2.imshow(window_name, display_img)
             key = cv2.waitKey(0) & 0xFF
             
             changed = False

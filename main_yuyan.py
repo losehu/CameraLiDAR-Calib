@@ -308,7 +308,7 @@ def list_images_sorted_by_number(dirpath):
     for entry in p.iterdir():
         if not entry.is_file():
             continue
-        if entry.suffix.lower() in ['.jpg', '.jpeg']:
+        if entry.suffix.lower() in ['.jpg', '.jpeg','.bmp']:
             imgs.append(entry)
     def numeric_key(pth):
         stem = pth.stem

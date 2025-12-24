@@ -265,16 +265,22 @@ static void render_projection(const cv::Mat &base,
     // 1) 准备 overlay：先拷贝一份 base，所有圆点画在 overlay 上
     cv::Mat overlay = base.clone();
     float theoryUV[2] = {0, 0};
-    int cnt = 0;
 
+    struct ProjectedPoint
+    {
+        int u;
+        int v;
+        float depth;
+    };
+    std::vector<ProjectedPoint> projected;
+    projected.reserve(pointcloud.size());
+
+    // 第一遍：只保留能投影到图像内的点，并记录它们的深度
     for (auto &pt : pointcloud)
     {
         float x = pt.x, y = pt.y, z = pt.z;
-        float depth = std::sqrt(x * x + y * y + z * z);
-        float t =atan( ((depth - dr.dmin) / (dr.dmax - dr.dmin))*10);
-        t = std::clamp(t, 0.0f, 1.0f);
+        float depth = std::sqrt(x * x + y * y + z * z); // 使用点到雷达原点的距离
 
-        // 注意：向 getTheoreticalUV_yuyan / pano 传入“同格式”的外参（12 就传 12，16 就传 16）
         std::vector<float> ext_pass = extrinsic_any; // 拷贝一份以防函数内部写入
         getTheoreticalUV_yuyan(theoryUV, ext_pass, x * 1000.f, y * 1000.f, z * 1000.f);
 
@@ -283,21 +289,42 @@ static void render_projection(const cv::Mat &base,
         if (u < 0 || u >= overlay.cols || v < 0 || v >= overlay.rows)
             continue;
 
-        // 颜色（HSV -> BGR）
+        projected.push_back({u, v, depth});
+    }
+
+    // 如果没有任何点投到图像上，直接返回原图
+    if (projected.empty())
+    {
+        out_img = base.clone();
+        return;
+    }
+
+    // 基于“能投影上的点”计算深度范围
+    float dmin = std::numeric_limits<float>::max();
+    float dmax = std::numeric_limits<float>::lowest();
+    for (const auto &p : projected)
+    {
+        dmin = std::min(dmin, p.depth);
+        dmax = std::max(dmax, p.depth);
+    }
+    if (dmax <= dmin)
+        dmax = dmin + 1e-6f;
+
+    // 第二遍：根据归一化深度映射彩虹色并绘制
+    for (auto &p : projected)
+    {
+        float t_norm = (p.depth - dmin) / (dmax - dmin);
+        t_norm = std::clamp(t_norm, 0.0f, 1.0f);
+        // 使用 arctan 让远处的点不至于全部挤在红色端
+        float t = std::atan(t_norm * 10.0f) / (float)(CV_PI / 2.0);
+
         float hue = (1.0f - t) * 270.0f;
         int r, g, b;
         HSVtoRGB(hue, 1.0f, 1.0f, r, g, b);
 
-        // 2) 画在 overlay 上（仍然是不透明的“画法”）
-        cv::circle(overlay, cv::Point(u, v), 5, cv::Scalar(b, g, r), -1, cv::LINE_AA);
-
-        // if (++cnt > threshold_lidar)
-        //     break;
+        cv::circle(overlay, cv::Point(p.u, p.v), 5, cv::Scalar(b, g, r), -1, cv::LINE_AA);
     }
 
-    // 3) overlay 与 base 按 kPointAlpha 做整体混合，得到 out_img
-    //    说明：overlay 初始是 base 的拷贝，未被圆点覆盖的像素 overlay==base，
-    //          所以 addWeighted 后这些像素仍等于 base，不会变灰或发暗。
     cv::addWeighted(overlay, kPointAlpha, base, 1.0f - kPointAlpha, 0.0, out_img);
 }
 
@@ -343,7 +370,7 @@ int main(int argc, char **argv)
         {
             std::string ext = entry.path().extension().string();
             std::transform(ext.begin(), ext.end(), ext.begin(), ::tolower);
-            if (ext == ".jpg" || ext == ".jpeg" || ext == ".png")
+            if (ext == ".jpg" || ext == ".jpeg" || ext == ".png" || ext == ".JPG" || ext == ".JPEG" || ext == ".PNG" || ext == ".bmp" || ext == ".BMP")
                 img_files.push_back(entry.path());
         }
     }

@@ -264,8 +264,11 @@ def load_intrinsics_file(path: str):
 
 
 # ============ 等距圆柱投影函数 ============
-def project_point_uv_from_ext(Rmat, tvec, x, y, z, img_width, img_height):
-    """等距圆柱投影（对应 getTheoreticalUV_yuyan 逻辑）"""
+def project_point_uv_from_ext(Rmat, tvec, x, y, z, img_width, img_height, up_degree: float = 90.0, low_degree: float = -90.0):
+    """等距圆柱投影（对应 getTheoreticalUV_yuyan 逻辑）。
+
+    支持通过 up_degree / low_degree（单位：度）自定义垂直映射范围，默认 90 / -90。
+    """
     matrix2 = np.zeros((3, 4), dtype=float)
     matrix2[:, :3] = Rmat
     matrix2[:, 3] = tvec
@@ -282,12 +285,13 @@ def project_point_uv_from_ext(Rmat, tvec, x, y, z, img_width, img_height):
     lon = math.atan2(v, u)
     lat = math.atan2(depth, math.sqrt(u * u + v * v))
     uv0 = (math.pi - lon) * img_width / (2.0 * math.pi)
-    uv1 = (0.5 * math.pi - lat) * img_height / math.pi
+    # 使用可配置的 up/low 度数计算 uv1
+    uv1 = (up_degree * math.pi / 180.0 - lat) * img_height / (math.pi * (up_degree - low_degree) / 180.0)
     return uv0, uv1
 
 
 # ============ 投影器创建 ============
-def make_projector(model: str, img_width: float, img_height: float, intrinsics=None, distortion=None):
+def make_projector(model: str, img_width: float, img_height: float, intrinsics=None, distortion=None, up_degree: float = 90.0, low_degree: float = -90.0):
     """创建投影器函数，支持针孔和等距圆柱投影"""
     model_lower = (model or 'equirectangular').lower()
     if model_lower == 'pinhole':
@@ -317,8 +321,8 @@ def make_projector(model: str, img_width: float, img_height: float, intrinsics=N
         return projector, model_lower
     # 等距圆柱投影
     def projector(Rmat, tvec, point):
-        return project_point_uv_from_ext(Rmat, tvec, point[0], point[1], point[2], img_width, img_height)
-    return projector, 'equirectangular'
+        return project_point_uv_from_ext(Rmat, tvec, point[0], point[1], point[2], img_width, img_height, up_degree, low_degree)
+    return projector, 'equirectangular' 
 
 
 # ============ 外参读取（需要根据实际格式调整） ============
@@ -591,6 +595,21 @@ def main():
             print(f"Failed to load intrinsics: {exc}")
             exit(1)
     
+    # 读取可配置的垂直映射范围（up_degree / low_degree）
+    up_degree = config.get('up_degree', 90.0) if config else 90.0
+    low_degree = config.get('low_degree', -90.0) if config else -90.0
+    try:
+        up_degree = float(up_degree)
+    except (TypeError, ValueError):
+        up_degree = 90.0
+    try:
+        low_degree = float(low_degree)
+    except (TypeError, ValueError):
+        low_degree = -90.0
+    if not (up_degree > low_degree):
+        print(f"Warning: up_degree ({up_degree}) <= low_degree ({low_degree}), swapping values.")
+        up_degree, low_degree = max(up_degree, low_degree), min(up_degree, low_degree)
+
     # 创建投影器
     try:
         projector, projection_model_used = make_projector(
@@ -599,6 +618,8 @@ def main():
             float(height),
             intrinsics=intrinsics,
             distortion=distortion,
+            up_degree=up_degree,
+            low_degree=low_degree,
         )
         print(f"Using projection model: {projection_model_used}")
     except ValueError as exc:

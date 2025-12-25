@@ -1,0 +1,18 @@
+#标注好的雷达点路径
+lidar_out: "./sign/lidar_huandai.txt"
+#标注好的图片点路径
+photo_out: "./sign/photo_huandai.txt"
+#雷达pcd文件夹路径
+lidar_dir: "./example/huandai/lidar"
+#图片文件夹路径
+image_dir: "./example/huandai/unfold"
+#外参保存路径
+extrinsic_out: "./result/extrinsic_huandai.txt"
+#图片宽
+image_width: 4096.0
+#图片高
+image_height: 512.0
+#37 8 30 15
+up_degree: 30.0
+
+low_degree: -15.0

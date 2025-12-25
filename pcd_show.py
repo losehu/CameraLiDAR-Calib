@@ -33,7 +33,7 @@ MAX_POINTS = 4
 CONFIG_NAME = "config/config.yaml"
 OUTPUT_FILE = ""
 CAM_PATH = "saved_cam.cam"
-PICKED_RADIUS_MM = 60.0
+PICKED_RADIUS_MM = 10.0
 LIDAR_RADIUS_MM = 100.0
 MAX_PICK_DISTANCE_M = 0.5
 
@@ -178,31 +178,51 @@ def hsv_to_rgb_array(h: np.ndarray, s: np.ndarray, v: np.ndarray) -> np.ndarray:
 
 
 def colorize_by_distance(cloud: o3d.geometry.PointCloud) -> None:
+    """Colorize points according to sqrt(x^2 + y^2).
+
+    Values are computed as r = sqrt(x^2 + y^2). We compute the 80th percentile
+    threshold T and map points with r <= T linearly to hues (red→purple).
+    Points with r > T are rendered using the final hue (purple).
+    """
     if len(cloud.points) == 0:
         return
 
     points = np.asarray(cloud.points)
-    dists = np.linalg.norm(points, axis=1)
-    d_min = float(np.min(dists))
-    d_max = float(np.max(dists))
+    xy = points[:, :3]
+    rs = np.linalg.norm(xy, axis=1)  # sqrt(x^2 + y^2)
 
-    if not math.isfinite(d_min) or not math.isfinite(d_max) or math.isclose(d_min, d_max):
+    r_min = float(np.min(rs))
+    r_max = float(np.max(rs))
+
+    # If values are invalid or degenerate, fall back to neutral gray
+    if not math.isfinite(r_min) or not math.isfinite(r_max) or math.isclose(r_min, r_max):
         cloud.colors = o3d.utility.Vector3dVector(np.full_like(points, 0.5))
         return
 
-    threshold = 300.0
-    cycle_count = 1.0  # number of rainbow cycles within the threshold distance
-    norm = np.clip(dists, 0.0, threshold) / max(threshold, 1e-6)
-    norm = np.power(norm, 0.8)  # bias toward near distances for stronger contrasts
-    hues = (240.0 - norm * cycle_count * 360.0) % 360.0
+    # Compute 80th percentile threshold
+    thresh = float(np.percentile(rs, 70))
+
+    # If threshold is approximately <= r_min, avoid division by zero and fallback
+    if thresh <= r_min + 1e-12:
+        cloud.colors = o3d.utility.Vector3dVector(np.full((len(points), 3), hsv_to_rgb_array(np.array([300.0]), np.array([1.0]), np.array([1.0]))[0]))
+        return
+
+    # Normalize values <= thresh to [0,1]; values > thresh set to 1.0 (mapped to final hue)
+    norm = np.empty_like(rs)
+    mask_low = rs <= thresh
+    if np.any(mask_low):
+        norm[mask_low] = (rs[mask_low] - r_min) / max((thresh - r_min), 1e-9)
+    norm[~mask_low] = 1.0
+    norm = np.clip(norm, 0.0, 1.0)
+
+    hues = norm * 300.0
     s = np.ones_like(hues)
     v = np.ones_like(hues)
     colors = hsv_to_rgb_array(hues, s, v)
 
-    far_mask = dists > threshold
-    if np.any(far_mask):
-        warm_rgb = np.array([1.0, 0.0, 0.0], dtype=np.float64)
-        colors[far_mask] = warm_rgb
+    # Ensure points beyond threshold use the final hue (purple at 300 deg)
+    final_rgb = hsv_to_rgb_array(np.array([300.0]), np.array([1.0]), np.array([1.0]))[0]
+    colors[~mask_low] = final_rgb
 
     cloud.colors = o3d.utility.Vector3dVector(colors)
 
@@ -930,11 +950,23 @@ class PCDLabelWindow:
         return gui.Widget.EventCallbackResult.IGNORED
 
 
+def natural_sort_key(name: str):
+    """Return a key for natural/human sorting of filenames (numbers as integers)."""
+    parts = re.split(r"(\d+)", name)
+    key = []
+    for p in parts:
+        if p.isdigit():
+            key.append(int(p))
+        else:
+            key.append(p.lower())
+    return tuple(key)
+
+
 def collect_pcds(input_arg: str) -> List[str]:
     path = Path(input_arg)
     pcds: List[str] = []
     if path.is_dir():
-        for entry in sorted(path.iterdir()):
+        for entry in sorted(path.iterdir(), key=lambda e: natural_sort_key(e.name)):
             if entry.is_file() and entry.suffix.lower() == ".pcd":
                 pcds.append(str(entry))
     elif path.is_file() and path.suffix.lower() == ".pcd":

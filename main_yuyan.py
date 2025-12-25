@@ -132,7 +132,7 @@ def load_intrinsics_file(path: str):
     return K, distortion
 
 
-def make_projector(model: str, img_width: float, img_height: float, intrinsics=None, distortion=None):
+def make_projector(model: str, img_width: float, img_height: float, intrinsics=None, distortion=None, up_degree: float = 90.0, low_degree: float = -90.0):
     model_lower = (model or 'equirectangular').lower()
     if model_lower == 'pinhole':
         if intrinsics is None:
@@ -160,12 +160,16 @@ def make_projector(model: str, img_width: float, img_height: float, intrinsics=N
             return float(uv_h[0] / denom), float(uv_h[1] / denom)
         return projector, model_lower
     def projector(Rmat, tvec, point):
-        return project_point_uv_from_ext(Rmat, tvec, point[0], point[1], point[2], img_width, img_height)
-    return projector, 'equirectangular'
+        return project_point_uv_from_ext(Rmat, tvec, point[0], point[1], point[2], img_width, img_height, up_degree, low_degree)
+    return projector, 'equirectangular' 
 
 
-def project_point_uv_from_ext(Rmat, tvec, x, y, z, img_width, img_height):
-    """Implements getTheoreticalUV_yuyan logic (same mapping as C++)."""
+def project_point_uv_from_ext(Rmat, tvec, x, y, z, img_width, img_height, up_degree: float = 90.0, low_degree: float = -90.0):
+    """Implements getTheoreticalUV_yuyan logic (same mapping as C++).
+
+    Accepts `up_degree` and `low_degree` (in degrees) to support configurable
+    vertical range mapping.
+    """
     matrix2 = np.zeros((3, 4), dtype=float)
     matrix2[:, :3] = Rmat
     matrix2[:, 3] = tvec
@@ -182,7 +186,9 @@ def project_point_uv_from_ext(Rmat, tvec, x, y, z, img_width, img_height):
     lon = math.atan2(v, u)
     lat = math.atan2(depth, math.sqrt(u * u + v * v))
     uv0 = (math.pi - lon) * img_width / (2.0 * math.pi)
-    uv1 = (0.5 * math.pi - lat) * img_height / math.pi
+    # uv1 = (0.5 * math.pi - lat) * img_height / math.pi
+    uv1 = (up_degree * math.pi / 180.0 - lat) * img_height / (math.pi * (up_degree - low_degree) / 180.0)
+
     return uv0, uv1
 
 
@@ -524,6 +530,22 @@ def main():
         except (OSError, ValueError) as exc:
             print(exc)
             return
+    # Read configurable vertical mapping bounds (degrees)
+    up_degree = config.get('up_degree', 90.0)
+    low_degree = config.get('low_degree', -90.0)
+    try:
+        up_degree = float(up_degree)
+    except (TypeError, ValueError):
+        up_degree = 90.0
+    try:
+        low_degree = float(low_degree)
+    except (TypeError, ValueError):
+        low_degree = -90.0
+    if not (up_degree > low_degree):
+        # Swap to ensure sensible ordering
+        print(f"Warning: up_degree ({up_degree}) <= low_degree ({low_degree}), swapping values.")
+        up_degree, low_degree = max(up_degree, low_degree), min(up_degree, low_degree)
+
     try:
         projector, projection_model = make_projector(
             projection_model,
@@ -531,6 +553,8 @@ def main():
             img_height,
             intrinsics=intrinsics,
             distortion=distortion,
+            up_degree=up_degree,
+            low_degree=low_degree,
         )
     except ValueError as exc:
         print(exc)

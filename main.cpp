@@ -141,7 +141,7 @@ void print_rotation(const Eigen::Matrix3f &R, int index)
 // 可选：float 坐标的重载（会就近取整到像素中心）
 inline bool drawDot(cv::Mat &img, const cv::Point2f &ptf,
                     const cv::Scalar &bgr = {0, 0, 255},
-                    int radius = 3, int thickness = cv::FILLED, int lineType = cv::LINE_AA)
+                    int radius = 1, int thickness = cv::FILLED, int lineType = cv::LINE_AA)
 {
     return drawDot(img, cv::Point(cvRound(ptf.x), cvRound(ptf.y)), bgr, radius, thickness, lineType);
 }
@@ -235,17 +235,17 @@ int main() {
     // getParameters();
 
     vector<PnPData> pData;
-    string lidar_path="/Users/losehu/Documents/归档/Pano_Video/calib/sign/lidar_point_pianzhen.txt";
-    string photo_path="/Users/losehu/Documents/归档/Pano_Video/calib/sign/photo_point_pianzhen.txt";
-    string intrinsic_path="/Users/losehu/Documents/归档/Pano_Video/calib/sign/int_pianzhen.txt";
-    string extrinsic_path="/Users/losehu/Documents/归档/Pano_Video/calib/result/extrinsic_pianzhen.txt";
-    string show_path="./";///home/nanyuan/偏振外参数据";
+    string lidar_path="/Users/losehu/CameraLiDAR-Calib/sign/lidar_point_hongwai.txt";
+    string photo_path="/Users/losehu/CameraLiDAR-Calib/sign/photo_point_hongwai.txt";
+    string intrinsic_path="/Users/losehu/CameraLiDAR-Calib/sign/int_hongwai.txt";
+    string extrinsic_path="/Users/losehu/CameraLiDAR-Calib/result/extrinsic_hongwai.txt";
+    string show_path="/Users/losehu/CameraLiDAR-Calib/example/hongwai/photo";
     // string lidar_path="/home/nanyuan/calib/leida_hongwai.txt";
     // string photo_path="/home/nanyuan/calib/xiangji_hongwai.txt";
     // string intrinsic_path="/home/nanyuan/calib/int_hongwai.TXT";
     // string extrinsic_path="/home/nanyuan/calib/extrinsic_hongwai.txt";
     // string show_path="/home/nanyuan/红外外参数据";
-
+    std::cout<<"nihao "<<std::endl;
     int error_threshold=12;
     init = {
         1.0f, 0.0f, 0.0f, 0.0f,

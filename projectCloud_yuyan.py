@@ -305,15 +305,23 @@ def make_projector(model: str, img_width: float, img_height: float, intrinsics=N
         def projector(Rmat, tvec, point):
             # point is expected in the same units as extrinsic (e.g., mm)
             p_c = Rmat @ point + tvec
-            cam_z = float(p_c[2])
+            X = float(p_c[0]); Y = float(p_c[1]); Z = float(p_c[2])
             # match C++ behaviour: only consider points with cam_z > 1e-6 (points behind camera are skipped)
-            if cam_z <= 0:
+            if Z <= 1e-6:
                 return (float('nan'), float('nan'))
-            uv_h = K @ p_c
-            denom = uv_h[2]
-            if abs(denom) < 1e-9:
-                denom = 1e-9 if denom >= 0 else -1e-9
-            return float(uv_h[0] / denom), float(uv_h[1] / denom)
+            # normalized coordinates (x = X/Z, y = Y/Z)
+            x = X / Z
+            y = Y / Z
+            # apply radial/tangential distortion (k1,k2,p1,p2,k3)
+            k1, k2, p1, p2, k3 = dist
+            r2 = x * x + y * y
+            radial = 1.0 + k1 * r2 + k2 * (r2 * r2) + k3 * (r2 * r2 * r2)
+            x_dist = x * radial + 2.0 * p1 * x * y + p2 * (r2 + 2.0 * x * x)
+            y_dist = y * radial + p1 * (r2 + 2.0 * y * y) + 2.0 * p2 * x * y
+            fx = K[0, 0]; fy = K[1, 1]; cx = K[0, 2]; cy = K[1, 2]
+            u = fx * x_dist + cx
+            v = fy * y_dist + cy
+            return float(u), float(v)
         return projector, model_lower
     # 等距圆柱投影
     def projector(Rmat, tvec, point):

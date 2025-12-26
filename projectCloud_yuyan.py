@@ -297,23 +297,19 @@ def make_projector(model: str, img_width: float, img_height: float, intrinsics=N
     if model_lower == 'pinhole':
         if intrinsics is None:
             raise ValueError("Pinhole projection requires intrinsics.")
+        # Follow C++ getTheoreticalUV exactly: uv = K * (R * point + t); then u = uv[0]/uv[2], v = uv[1]/uv[2]
         K = np.asarray(intrinsics, dtype=float)
         dist = np.zeros(5, dtype=float)
         if distortion is not None:
             dist[:min(len(distortion), 5)] = np.asarray(distortion, dtype=float)[:min(len(distortion), 5)]
         def projector(Rmat, tvec, point):
+            # point is expected in the same units as extrinsic (e.g., mm)
             p_c = Rmat @ point + tvec
-            z = p_c[2]
-            if abs(z) < 1e-9:
-                z = 1e-9 if z >= 0 else -1e-9
-            x = p_c[0] / z
-            y = p_c[1] / z
-            r2 = x * x + y * y
-            k1, k2, p1, p2, k3 = dist
-            radial = 1.0 + k1 * r2 + k2 * r2 * r2 + k3 * r2 * r2 * r2
-            x_distorted = x * radial + 2.0 * p1 * x * y + p2 * (r2 + 2.0 * x * x)
-            y_distorted = y * radial + p1 * (r2 + 2.0 * y * y) + 2.0 * p2 * x * y
-            uv_h = K @ np.array([x_distorted, y_distorted, 1.0], dtype=float)
+            cam_z = float(p_c[2])
+            # match C++ behaviour: only consider points with cam_z > 1e-6 (points behind camera are skipped)
+            if cam_z <= 0:
+                return (float('nan'), float('nan'))
+            uv_h = K @ p_c
             denom = uv_h[2]
             if abs(denom) < 1e-9:
                 denom = 1e-9 if denom >= 0 else -1e-9

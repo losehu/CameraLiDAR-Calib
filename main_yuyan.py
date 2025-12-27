@@ -125,10 +125,9 @@ def load_intrinsics_file(path: str):
     if len(values) < 9:
         raise ValueError(f"Intrinsics file requires at least 9 numeric values: {path}")
     K = np.array(values[:9], dtype=float).reshape(3, 3)
-    distortion = np.zeros(5, dtype=float)
     remaining = values[9:]
-    for idx in range(min(5, len(remaining))):
-        distortion[idx] = remaining[idx]
+    # Return all remaining numeric tokens as the distortion vector (variable-length).
+    distortion = np.array(remaining, dtype=float) if remaining else np.array([], dtype=float)
     return K, distortion
 
 

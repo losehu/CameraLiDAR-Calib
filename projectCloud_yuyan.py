@@ -241,7 +241,10 @@ def orthonormalize(R):
 
 # ============ 内参读取 ============
 def load_intrinsics_file(path: str):
-    """从文件读取内参矩阵和畸变系数"""
+    """从文件读取内参矩阵和任意长度的畸变系数（兼容旧格式）。
+
+    返回：K（3x3 numpy array），distortion（numpy array，可为空，长度可变）
+    """
     values = []
     with open(path, 'r', encoding='utf-8') as f:
         for line in f:
@@ -256,10 +259,8 @@ def load_intrinsics_file(path: str):
     if len(values) < 9:
         raise ValueError(f"Intrinsics file requires at least 9 numeric values: {path}")
     K = np.array(values[:9], dtype=float).reshape(3, 3)
-    distortion = np.zeros(5, dtype=float)
     remaining = values[9:]
-    for idx in range(min(5, len(remaining))):
-        distortion[idx] = remaining[idx]
+    distortion = np.array(remaining, dtype=float) if remaining else np.array([], dtype=float)
     return K, distortion
 
 

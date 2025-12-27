@@ -37,6 +37,10 @@ PICKED_RADIUS_MM = 10.0
 LIDAR_RADIUS_MM = 100.0
 MAX_PICK_DISTANCE_M = 0.5
 
+# Colorization defaults (can be overridden in config YAML)
+COLORIZE_PERCENTILE = 90.0  # percentile used to compute threshold (0-100)
+COLORIZE_MAX_HUE = 300.0    # hue degree used for farthest points
+
 POINT_SHADER = "defaultUnlit"
 SPHERE_SHADER_SOLID = "defaultLit"
 SPHERE_SHADER_ALPHA = "defaultLitTransparency"
@@ -177,12 +181,12 @@ def hsv_to_rgb_array(h: np.ndarray, s: np.ndarray, v: np.ndarray) -> np.ndarray:
     return np.column_stack((r, g, b))
 
 
-def colorize_by_distance(cloud: o3d.geometry.PointCloud) -> None:
+def colorize_by_distance(cloud: o3d.geometry.PointCloud, percentile: float = 70.0, max_hue: float = 300.0) -> None:
     """Colorize points according to sqrt(x^2 + y^2).
 
-    Values are computed as r = sqrt(x^2 + y^2). We compute the 80th percentile
-    threshold T and map points with r <= T linearly to hues (red→purple).
-    Points with r > T are rendered using the final hue (purple).
+    Values are computed as r = sqrt(x^2 + y^2). We compute the `percentile`
+    threshold T and map points with r <= T linearly to hues (0->`max_hue`).
+    Points with r > T are rendered using the final hue (`max_hue`).
     """
     if len(cloud.points) == 0:
         return
@@ -199,12 +203,14 @@ def colorize_by_distance(cloud: o3d.geometry.PointCloud) -> None:
         cloud.colors = o3d.utility.Vector3dVector(np.full_like(points, 0.5))
         return
 
-    # Compute 80th percentile threshold
-    thresh = float(np.percentile(rs, 70))
+    # Clamp percentile and compute threshold
+    pct = float(min(max(percentile, 0.0), 100.0))
+    thresh = float(np.percentile(rs, pct))
 
     # If threshold is approximately <= r_min, avoid division by zero and fallback
     if thresh <= r_min + 1e-12:
-        cloud.colors = o3d.utility.Vector3dVector(np.full((len(points), 3), hsv_to_rgb_array(np.array([300.0]), np.array([1.0]), np.array([1.0]))[0]))
+        final_rgb = hsv_to_rgb_array(np.array([max_hue]), np.array([1.0]), np.array([1.0]))[0]
+        cloud.colors = o3d.utility.Vector3dVector(np.full((len(points), 3), final_rgb))
         return
 
     # Normalize values <= thresh to [0,1]; values > thresh set to 1.0 (mapped to final hue)
@@ -215,13 +221,13 @@ def colorize_by_distance(cloud: o3d.geometry.PointCloud) -> None:
     norm[~mask_low] = 1.0
     norm = np.clip(norm, 0.0, 1.0)
 
-    hues = norm * 300.0
+    hues = norm * max_hue
     s = np.ones_like(hues)
     v = np.ones_like(hues)
     colors = hsv_to_rgb_array(hues, s, v)
 
-    # Ensure points beyond threshold use the final hue (purple at 300 deg)
-    final_rgb = hsv_to_rgb_array(np.array([300.0]), np.array([1.0]), np.array([1.0]))[0]
+    # Ensure points beyond threshold use the final hue
+    final_rgb = hsv_to_rgb_array(np.array([max_hue]), np.array([1.0]), np.array([1.0]))[0]
     colors[~mask_low] = final_rgb
 
     cloud.colors = o3d.utility.Vector3dVector(colors)
@@ -602,7 +608,7 @@ class PCDLabelWindow:
             print(f"Failed to load or empty cloud: {pcd_path}")
             return
 
-        colorize_by_distance(cloud)
+        colorize_by_distance(cloud, percentile=COLORIZE_PERCENTILE, max_hue=COLORIZE_MAX_HUE)
         self.current_cloud = cloud
         self.current_cloud_np = np.asarray(cloud.points)
         self.current_kd_tree = o3d.geometry.KDTreeFlann(cloud)
@@ -988,6 +994,18 @@ def main() -> int:
 
     lidar_dir = config.get("lidar_dir")
     lidar_out = config.get("lidar_out")
+
+    # Read optional colorization settings
+    global COLORIZE_PERCENTILE, COLORIZE_MAX_HUE
+    try:
+        COLORIZE_PERCENTILE = float(config.get('color_percentile', COLORIZE_PERCENTILE))
+    except Exception:
+        pass
+    try:
+        COLORIZE_MAX_HUE = float(config.get('color_max_hue', COLORIZE_MAX_HUE))
+    except Exception:
+        pass
+    print(f"Colorize: percentile={COLORIZE_PERCENTILE}, max_hue={COLORIZE_MAX_HUE}")
 
     if len(sys.argv) >= 2:
         lidar_dir = sys.argv[1]

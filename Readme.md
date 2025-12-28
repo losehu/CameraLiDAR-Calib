@@ -5,7 +5,7 @@
 本项目用于相机与激光雷达的外参标定，支持针孔/鱼眼相机、等矩形投影图（ERP）、以及全景环带相机（PAL）。标定流程以“手工标注四个角点”为核心，结合优化与可视化完成外参求解。
 
 **数据准备（必读）**
-`example/` 文件夹存放示例图片与点云文件，请先从 Google Drive 链接 `abcd` 下载 zip 并解压后放入该目录，否则示例无法运行。
+`example/` 文件夹存放示例图片与点云文件，请先从 [Google Drive 链接](https://drive.google.com/file/d/1UM3ZfcYInfgu6ADCPa5w8MAr3hAx7B-p/view?usp=sharing) 下载 zip 并解压后放入该目录，否则示例无法运行。
 
 ## 目录
 

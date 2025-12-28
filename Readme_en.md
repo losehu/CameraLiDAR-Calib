@@ -3,7 +3,7 @@
 This project calibrates LiDAR-to-camera extrinsics for pinhole/fisheye cameras, equirectangular (ERP) images, and panoramic annular (PAL) cameras. The workflow uses manual selection of four corresponding corners, followed by optimization and visual validation.
 
 **Data Preparation (Required)**
-Sample images and point clouds are stored in `example/`. Download the zip from the Google Drive link `abcd`, unzip it, and place the contents in that folder before running examples.
+Sample images and point clouds are stored in `example/`. Download the zip from the [Google Drive Link](https://drive.google.com/file/d/1UM3ZfcYInfgu6ADCPa5w8MAr3hAx7B-p/view?usp=sharing), unzip it, and place the contents in that folder before running examples.
 
 ## Table of Contents
 

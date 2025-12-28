@@ -48,7 +48,7 @@ pip install open3d numpy opencv-python scipy pyyaml
 1. Shallow clone the repo (no history to keep data size small):
 
 ```bash
-git clone --depth 1 <repo_url>
+git clone --depth 1 https://github.com/losehu/CameraLiDAR-Calib.git
 ```
 
 2. Choose a dataset config in `config/config.yaml`.

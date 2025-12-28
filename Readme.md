@@ -60,7 +60,7 @@ pip install open3d numpy opencv-python scipy pyyaml
 1. 浅克隆仓库（不拉取历史，减少数据量）：
 
 ```bash
-git clone --depth 1 <repo_url>
+git clone --depth 1 https://github.com/losehu/CameraLiDAR-Calib.git
 ```
 
 2. 选择数据集配置：编辑 `config/config.yaml`，指向你的配置文件。

@@ -1,149 +1,198 @@
 [English Readme](./Readme_en.md)
+
 # 雷达-相机外参标定流程
-本项目用于等矩形投影全景图或针孔相机图像与雷达之间的外参标定，可在统一流程下切换成像模型。
 
-两套传感器同时观察同一矩形标定板，通过手动拾取板上四个角点完成外参优化。整套流程分为三步：
+本项目用于相机与激光雷达的外参标定，支持针孔/鱼眼相机、等矩形投影图（ERP）、以及全景环带相机（PAL）。标定流程以“手工标注四个角点”为核心，结合优化与可视化完成外参求解。
 
-1. `get_point.py` —— 标注每张图像里的四个角点
-2. `pcd_show.py` —— 标注对应雷达点云中的四个角点
-3. `main_yuyan.py` —— 根据两套标注求解相机-雷达外参并做可视化验证
-
-下面列出了运行前的配置方式、每一步的详细操作以及常用快捷键。
+**数据准备（必读）**
+`example/` 文件夹存放示例图片与点云文件，请先从 Google Drive 链接 `abcd` 下载 zip 并解压后放入该目录，否则示例无法运行。
 
 ## 目录
+
+- [支持的相机类型](#支持的相机类型)
 - [环境与依赖](#环境与依赖)
+- [目录结构](#目录结构)
+- [快速开始](#快速开始)
 - [配置文件说明](#配置文件说明)
-- [第一步：图像角点标注 (`get_point.py`)](#第一步图像角点标注-get_pointpy)
-- [第二步：点云角点标注 (`pcd_show.py`)](#第二步点云角点标注-pcd_showpy)
-- [第三步：求解外参 (`main_yuyan.py`)](#第三步求解外参-main_yuyanpy)
-- [常见问题排查](#常见问题排查)
+- [针孔-鱼眼-ERP 标定流程](#针孔-鱼眼-ERP-标定流程)
+- [环带相机 PAL 标定流程](#环带相机-pal-标定流程)
+- [输出结果](#输出结果)
+- [常见问题](#常见问题)
+
+## 支持的相机类型
+
+- 针孔/鱼眼相机
+
+  ![针孔/鱼眼图](image/pinhole.png)
+
+- 多鱼眼拼接的全景相机（ERP）
+
+  ![4鱼眼拼接的ERP全景图](image/four_fisheye_ERP.png)
+
+- 全景环带相机（ERP 展开图 / 原始 PAL）
+
+  ![全景环带相机ERP图](image/ERP.png)
+
+  ![全景环带相机原图](image/PAL.png)
 
 ## 环境与依赖
 
-- Python 3.10（或更高）
+- Python 3.10 或更高版本
 - 依赖包：`open3d`, `numpy`, `opencv-python`, `scipy`, `pyyaml`
 
 ```bash
 pip install open3d numpy opencv-python scipy pyyaml
 ```
 
+## 目录结构
+
+- `config/`: 配置文件
+- `example/`: 示例数据
+- `sign/`: 标注点与内参示例
+- `result/`: 外参和优化后的内参输出
+- `label_image_corners.py`: 图像标注工具
+- `label_lidar_corners.py`: 点云标注工具
+- `lidar_image_overlay.py`: 针孔/鱼眼/ERP 标定与可视化
+- `extrinsics_PAL.cpp`: PAL 相机标定与可视化
+
+## 快速开始
+
+1. 浅克隆仓库（不拉取历史，减少数据量）：
+
+```bash
+git clone --depth 1 <repo_url>
+```
+
+2. 选择数据集配置：编辑 `config/config.yaml`，指向你的配置文件。
+2. 标注图像角点：运行 `label_image_corners.py`。
+3. 标注雷达角点：运行 `label_lidar_corners.py`。
+4. 运行标定与可视化（不同相机类型对应不同脚本）。
+
 ## 配置文件说明
 
-项目根目录下的 `config/config.yaml` 只负责“指向”真实的配置文件：
+`config/config.yaml` 只用于重定向实际数据配置文件：
 
 ```yaml
-# config/config.yaml
 config_path: config/911.yaml
 ```
 
-各数据集的具体参数写在 `config/*.yaml` 中（例如 `config/911.yaml`）：
+数据集配置示例（针孔/鱼眼/ERP）：
 
 ```yaml
-# 标注结果输出路径
-lidar_out: "/path/to/lidar_OUT911.txt"      # 雷达角点标注输出
-photo_out: "/path/to/cam_point911.txt"     # 图像角点标注输出
-
-# 输入数据
-lidar_dir: "/path/to/lidar_pcd_dir"         # 存放 .pcd 的目录
-image_dir: "/path/to/image_dir"             # 存放图像的目录
-
-# 外参输出
-extrinsic_out: "./sign/extrinsic_911_py.txt"
-
-# 成像模型：equirectangular（等矩形全景）或 pinhole（针孔畸变）
+# 标注好的雷达点路径, txt
+lidar_out: "./sign/lidar_point_hongwai.txt"
+# 标注好的图片点路径, txt
+photo_out: "./sign/photo_point_hongwai.txt"
+# 雷达 pcd 文件夹路径
+lidar_dir: "./example/hongwai/lidar"
+# 图片文件夹路径
+image_dir: "./example/hongwai/photo"
+# 外参保存路径, txt
+extrinsic_out: "./result/extrinsic_hongwai.txt"
+# 内参路径, txt, 等矩形投影图不需要填
+intrinsics_path: "./sign/int_hongwai.txt"
+# 投影模型, 等矩形投影图不需要填
 projection_model: "pinhole"
-
-# 针孔模型下的内参与畸变文件（至少 9 个数，后续可附加最多 5 个畸变系数）
-intrinsics_path: "/path/to/int_pianzhen.txt"
+# 图片宽高
+image_width: 640
+image_height: 512
 ```
 
-若使用全景等矩形模型，将 `projection_model` 设为 `equirectangular` 或省略该参数，并省略 `intrinsics_path`；针孔模型需提供对应的内参文件（矩阵 3×3 展平 + 畸变）。配置修改后，`main_yuyan.py` 会自动读取新的模型与参数。
+说明：
+- `lidar_out` / `photo_out` / `extrinsic_out` 为输出路径，可自定义。
+- `lidar_dir` / `image_dir` / `intrinsics_path` / `image_width` / `image_height` 请根据数据实际情况填写。
+- 内参格式参考：`sign/int_hongwai.txt` 与 `sign/int_pianzhen.txt`。
 
-修改流程：
+## 针孔-鱼眼-ERP 标定流程
 
-1. 新建/调整某个数据集的 YAML（如上例中的 `config/911.yaml`）。
-2. 在 `config/config.yaml` 中把 `config_path` 指向该 YAML。
-3. 重新运行标注或求解脚本即可读到最新配置。
-
-> **提示**：所有脚本都会在启动时清空对应输出文件。如果需要保留旧结果，请先做备份。
-
-## 第一步：图像角点标注 (`get_point.py`)
+1. 修改 `config/config.yaml`，指向对应的数据配置文件。
+   - `config/911.yaml` / `config/913.yaml` / `config/923.yaml` 为 ERP 示例配置。
+   - `config/hongwai.yaml` / `config/pianzhen.yaml` 为针孔/鱼眼示例配置。
+2. 标注图像角点：
 
 ```bash
-python get_point.py
+python label_image_corners.py
 ```
 
-脚本启动后会读取 `photo_out` 指定的 TXT 文件，并在开始前清空内容。每张图像需要按照固定顺序（通常为顺时针或逆时针）拾取 **四个角点**。每拾取一张图像后，脚本会立即把数据写入 `photo_out`。
+使用鼠标左键在图像中点击四个角点（例如标定板角点）。
 
-### 常用快捷键
-
-- `鼠标左键`：拾取角点，最多四个
-- `Enter / 回车`：输出当前图片的角点并切换到下一张
-- `n` / `p`：切换下一张 / 上一张图片
-- `b`：撤销当前图像上的最后一个角点
-- `r`：清空当前图像上的所有角点
-- `j` / `h`：放大 / 缩小
-- `W` `S` `A` `D`：视图平移
-- `q` / `Esc`：保存当前图像的角点后退出
-
-### 其他行为
-
-- 所有 JPEG/JPG/PNG/BMP 等图片会按**自然排序**加载（`1, 2, …, 10`），避免 `3.jpg` 排在 `29.jpg` 之后。
-- 支持固定窗口（默认 1600×900）或按原图大小显示，可在脚本顶部修改 `FIXED_WINDOW`。
-
-## 第二步：点云角点标注 (`pcd_show.py`)
+3. 标注雷达角点：
 
 ```bash
-python pcd_show.py
+python label_lidar_corners.py
 ```
 
-脚本读取 `lidar_dir` 下的全部 `.pcd` 文件，并在开始前清空 `lidar_out` 指定的标注文件。需要同样按照固定顺序拾取标定板的四个角点（单位：毫米）。
+使用 Shift + 鼠标左键在点云中点击四个角点。
 
-### 常用快捷键
-
-- `Shift + 鼠标左键`：拾取点云角点（一次四个）
-- `Enter / 回车`：保存当前点云标注并自动跳转下一帧
-- `n` / `Shift + n`：下一帧 / 上一帧
-- `b`：撤销上一个角点
-- `p` / `l`：保存 / 加载当前相机视角到 `saved_cam.cam`
-- `r`：重置视角到点云包围盒
-- `q`：退出程序
-
-### 其他行为
-
-- 点云颜色会根据距离自动着色：0–20 米经历多次冷暖色循环，超过阈值的点固定为暖色。
-- 同一张标定板的四个角点保存后不会插入空行，方便与旧工具对比。
-
-## 第三步：求解外参 (`main_yuyan.py`)
+4. 运行标定与可视化：
 
 ```bash
-python main_yuyan.py
+python lidar_image_overlay.py
 ```
 
-脚本会按照配置文件读取：
+## 环带相机 PAL 标定流程
 
-- `photo_out`：图像角点 TXT
-- `lidar_out`：点云角点 TXT
-- `image_dir`：对应的原始图像目录（用于可视化）
-- `extrinsic_out`：计算得到的外参输出文件（4×4 格式）
+1. 使用 [PanoRing-Calib](https://github.com/losehu/PanoRing-Calib) 先获得环带相机初始内参，示例见 `sign/int_huandai.txt`。
+2. 填写 PAL 配置文件，参考 `config/huandai.yaml`：
 
-执行流程：
+```yaml
+# 标注好的雷达点路径
+lidar_out: "./sign/lidar_point_huandai.txt"
+# 标注好的图片点路径
+photo_out: "./sign/photo_point_huandai.txt"
+# 雷达 pcd 文件夹路径
+lidar_dir: "./example/huandai/lidar"
+# 图片文件夹路径
+image_dir: "./example/huandai/photo"
+# 展开图文件夹路径
+erp_image_dir: "./example/huandai/new_unfold"
+# 外参保存路径
+extrinsic_out: "./result/extrinsic_huandai.txt"
+# 内参路径
+intrinsics_path: "./sign/int_huandai.txt"
+# 优化后内参保存路径
+intrinsics_better: "./result/ocam_refined_huandai.txt"
+```
 
-1. 读取角点配对数据，并生成 90° 旋转的初值集合。
-2. 对每个初值执行非线性最小二乘（四元数 + 平移）。
-3. 选择误差最小的解并写入 `extrinsic_out`。
-4. 若开启 `visualize=True`（默认），按照 `photo_out` 中的顺序逐张图像展示理论投影与手工标注点，以便人工检查。
+3. 标注图像与雷达角点（同上）：
 
-### 终端输出
+```bash
+python label_image_corners.py
+python label_lidar_corners.py
+```
 
-- 每个初值会输出 `(u_err, v_err)` 平均误差及其和(和小于10为优)。
-- 训练完成后会提示最优误差，并在窗口中展示匹配情况。
+4. 安装 `CMakeLists.txt` 中提示的 C++ 依赖，编译并运行 `extrinsics_PAL.cpp` 完成标定与可视化。
 
-## 常见问题排查
+5. 标定完成后会输出 `flip` 情况，请在后续 Python 脚本中同步修改 `flip` 参数（如 `PAL2ERP.py`、`lidar_PAL_ERP_overlay.py`、`lidar_PAL_overlay.py`）。
 
-- **找不到配置文件**：确认 `config/config.yaml` 指向的路径存在且拼写正确。
-- **加载不到图片/点云**：检查 YAML 中的路径是否带有特殊字符或空格，必要时使用绝对路径。
-- **标注顺序不一致**：务必保证图像与点云的角点拾取顺序一致（同一块板，同一旋转方向）。
-- **窗口过大或过小**：可调整 `get_point.py` 中的 `WINDOW_W/H` 以及 `FIXED_WINDOW`，或在 `pcd_show.py` 中保存自定义相机视角。
+6. 标定完成后：
 
-完成以上三步，即可得到与原 C++ 流程等价的外参结果。祝标定顺利！
+- 展开 PAL 图到 ERP：
+
+```bash
+python PAL2ERP.py
+```
+
+- 将雷达点投影到展开 ERP：
+
+```bash
+python lidar_PAL_ERP_overlay.py
+```
+
+- 将雷达点投影到 PAL 原图：
+
+```bash
+python lidar_PAL_overlay.py
+```
+
+## 输出结果
+
+- 外参：`result/` 下的 `extrinsic_*.txt`
+- PAL 优化后的内参：`result/ocam_refined_*.txt`
+- 标注点：`sign/` 下的 `lidar_point_*.txt` 与 `photo_point_*.txt`
+
+## 常见问题
+
+- 标注文件会被覆盖：每次标注会覆盖旧文件，请提前备份。
+- 点顺序必须一致：图像与点云的四点顺序需一一对应，否则优化失败或误差很大。
+- 路径含中文或空格时，建议使用绝对路径，避免读取失败。

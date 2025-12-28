@@ -1,4 +1,3 @@
-#四鱼眼拼接等矩形投影图标定配置文件
 #标注好的雷达点路径
 lidar_out: "./sign/lidar_point_hongwai.txt"
 #标注好的图片点路径

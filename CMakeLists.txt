@@ -135,21 +135,13 @@ function(add_my_executable target_name source_file)
 endfunction()
 
 # =============== 你的可执行文件 =========================
-add_my_executable(main             main.cpp)
-add_my_executable(main1             main1.cpp)
 
-add_my_executable(pcd_show         pcd_show.cpp)
-add_my_executable(projectpano      projectCloud_pano.cpp)
-add_my_executable(projectpano2     projectCloud_pano2.cpp)
-# add_my_executable(pano_yaw         main_pano_yaw.cpp)
-add_my_executable(projectCloud_pano2_show projectCloud_pano2_show.cpp)
-
-add_my_executable(pcd_viewer       pcd_viewer.cpp)
+add_my_executable(extrinsics_PAL             extrinsics_PAL.cpp)
 # =============== VTK 9+ 模块自动初始化 ==================
 if (VTK_FOUND AND COMMAND vtk_module_autoinit)
   vtk_module_autoinit(
     TARGETS
-       main main1 pcd_show  projectpano projectpano2    pcd_viewer
+    extrinsics_PAL  
     MODULES
       ${VTK_LIBRARIES}
   )

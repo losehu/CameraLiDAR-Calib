@@ -234,6 +234,18 @@ void getUVError_pano(const std::string &intrinsic_path, const std::string &extri
 
     std::vector<float> extrinsic;
     getExtrinsic(extrinsic_path, extrinsic);
+    // If extrinsic translation is unreasonably large (optimizer runaway), scale it down for visualization
+    if (extrinsic.size() >= 12) {
+        double tx = extrinsic[3];
+        double ty = extrinsic[7];
+        double tz = extrinsic[11];
+        double tnorm = std::sqrt(tx*tx + ty*ty + tz*tz);
+        if (tnorm > 1e5) {
+            double factor = 1e-6;
+            std::cerr << "Warning: extrinsic translation large (" << tnorm << ") - scaling by " << factor << " for visualization." << std::endl;
+            extrinsic[3] *= factor; extrinsic[7] *= factor; extrinsic[11] *= factor;
+        }
+    }
     auto files = list_images_sorted_by_number(valid_path);
     cv::Mat image;
     while (getline(inFile_lidar, lineStr_lidar) && getline(inFile_photo, lineStr_photo))
@@ -275,13 +287,19 @@ void getUVError_pano(const std::string &intrinsic_path, const std::string &extri
             getTheoreticalUV_pano(theoryUV, ocam_model, extrinsic, x, y, z);
             if (vaild)
             {
+                // Draw theoretical projection (green)
                 drawCircleAt(image, theoryUV[0], theoryUV[1], 20, cv::Scalar(0, 255, 0), -1); // 绿色实心圆
 
-                if ((count + 1) % 4 == 0) 
+                // Draw measured/photo points with colors by index: 0:red,1:green,2:blue,3:yellow
+                cv::Scalar color_map[4] = {cv::Scalar(0, 0, 255), cv::Scalar(0, 255, 0), cv::Scalar(255, 0, 0), cv::Scalar(255, 255, 0)};
+                cv::Scalar data_color = color_map[count % 4];
+                drawCircleAt(image, dataU, dataV, 20, data_color, -1);
+
+                // Show image after each group of 4 points
+                if ((count + 1) % 4 == 0)
                 {
                     cv::imshow(int2str(count / 4), image);
                     cv::waitKey(0);
-                    // exit(0);
                 }
             }
             errorU = abs(dataU - theoryUV[0]);
@@ -305,10 +323,16 @@ void getUVError_pano(const std::string &intrinsic_path, const std::string &extri
             // exit(0);
             break;
         }
-        else if ((lineStr_lidar.size() < 10 && lineStr_photo.size() > 10) || (lineStr_lidar.size() > 10 && lineStr_photo.size() < 10))
-        {
-            std::cout << "LiDAR data and photo data not aligned!" << std::endl;
-            exit(1);
+        else {
+            // More robust check: detect whether a line contains coordinate data (has spaces)
+            bool hasSpace_lidar = (lineStr_lidar.find(' ') != std::string::npos);
+            bool hasSpace_photo = (lineStr_photo.find(' ') != std::string::npos);
+            if (hasSpace_lidar != hasSpace_photo) {
+                std::cout << "LiDAR data and photo data not aligned!" << std::endl;
+                std::cout << "Lidar line: '" << lineStr_lidar << "' (hasSpace=" << hasSpace_lidar << ")" << std::endl;
+                std::cout << "Photo line: '" << lineStr_photo << "' (hasSpace=" << hasSpace_photo << ")" << std::endl;
+                exit(1);
+            }
         }
     }
 
@@ -398,6 +422,17 @@ void getUVError(const string &intrinsic_path, const string &extrinsic_path, cons
     getIntrinsic(intrinsic_path, intrinsic);
     vector<float> extrinsic;
     getExtrinsic(extrinsic_path, extrinsic);
+    if (extrinsic.size() >= 12) {
+        double tx = extrinsic[3];
+        double ty = extrinsic[7];
+        double tz = extrinsic[11];
+        double tnorm = std::sqrt(tx*tx + ty*ty + tz*tz);
+        if (tnorm > 1e5) {
+            double factor = 1e-6;
+            std::cerr << "Warning: extrinsic translation large (" << tnorm << ") - scaling by " << factor << " for visualization." << std::endl;
+            extrinsic[3] *= factor; extrinsic[7] *= factor; extrinsic[11] *= factor;
+        }
+    }
     cv::Mat image;
     auto files = list_images_sorted_by_number(valid_path);
 

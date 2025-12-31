@@ -110,7 +110,13 @@ python label_lidar_corners.py
 
 Use Shift + left-click to select four LiDAR points.
 
-4. Run calibration and visualization:
+4. Run calibration
+
+```bash
+python extrinsic.py
+```
+
+5. Run visualization:
 
 ```bash
 python lidar_image_overlay.py

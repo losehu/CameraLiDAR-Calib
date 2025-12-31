@@ -124,7 +124,13 @@ python label_lidar_corners.py
 
 使用 Shift + 鼠标左键在点云中点击四个角点。
 
-4. 运行标定与可视化：
+4. 运行标定
+
+```bash
+python extrinsic.py
+```
+
+5. 运行可视化：
 
 ```bash
 python lidar_image_overlay.py

@@ -634,7 +634,7 @@ def main():
         exit(1)
 
     # 获取图片列表
-    img_extensions = ['*.jpg', '*.jpeg', '*.png', '*.JPG', '*.JPEG', '*.PNG', '*.bmp', '*.BMP']
+    img_extensions = ['*.jpg', '*.jpeg', '*.png','*.bmp']
     img_files = []
     for ext in img_extensions:
         img_files.extend(glob.glob(os.path.join(img_dir, ext)))

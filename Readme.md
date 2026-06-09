@@ -202,3 +202,14 @@ python lidar_PAL_overlay.py
 - 标注文件会被覆盖：每次标注会覆盖旧文件，请提前备份。
 - 点顺序必须一致：图像与点云的四点顺序需一一对应，否则优化失败或误差很大。
 - 路径含中文或空格时，建议使用绝对路径，避免读取失败。
+
+## 🤝 引用
+
+```
+@article{zhao2026panoramic,
+  title={Panoramic Multimodal Semantic Occupancy Prediction for Quadruped Robots},
+  author={Zhao, Guoqiang and Yang, Zhe and Wu, Sheng and Teng, Fei and Duan, Mengfei and Zheng, Yuanfan and Luo, Kai and Yang, Kailun},
+  journal={arXiv preprint arXiv:2603.13108},
+  year={2026}
+}
+```

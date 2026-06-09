@@ -180,3 +180,14 @@ python lidar_PAL_overlay.py
 - Annotation files are overwritten on each run; back up if needed.
 - Corner ordering must match between image and LiDAR.
 - If paths include non-ASCII characters, prefer absolute paths.
+
+## 🤝 Citation
+
+```
+@article{zhao2026panoramic,
+  title={Panoramic Multimodal Semantic Occupancy Prediction for Quadruped Robots},
+  author={Zhao, Guoqiang and Yang, Zhe and Wu, Sheng and Teng, Fei and Duan, Mengfei and Zheng, Yuanfan and Luo, Kai and Yang, Kailun},
+  journal={arXiv preprint arXiv:2603.13108},
+  year={2026}
+}
+```
